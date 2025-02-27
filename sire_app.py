@@ -1,6 +1,5 @@
 import streamlit as st
 import json
-import pandas as pd
 from datetime import datetime
 from docx import Document
 from docx.shared import Inches
@@ -42,11 +41,6 @@ st.markdown("""
         border-radius: 5px;
         color: white;
         margin-bottom: 20px;
-    }
-    
-    /* Table styling */
-    .dataframe {
-        width: 100%;
     }
     
     /* Section headers */
@@ -150,7 +144,7 @@ def process_inspection_data(inspection_data):
             
             metadata[key] = value
 
-        metadata_df = pd.DataFrame(list(metadata.items()), columns=['Field', 'Value'])
+        metadata_list = list(metadata.items())
 
         # Process comments
         comments = []
@@ -171,7 +165,7 @@ def process_inspection_data(inspection_data):
         # Generate sequential question numbers
         question_numbers = generate_question_numbers(comments)
         
-        # Create comments dataframe
+        # Create comments list
         comments_data = []
         for comment in comments:
             # Use the mapped question number instead of the UUID
@@ -183,18 +177,13 @@ def process_inspection_data(inspection_data):
                 comment['date']
             ])
         
-        comments_df = pd.DataFrame(
-            comments_data, 
-            columns=["Question", "Inspector Comment", "Operator Comment", "Date"]
-        )
-        
-        return metadata_df, comments_df
+        return metadata_list, comments_data
         
     except Exception as e:
         st.error(f"Error processing data: {str(e)}")
         return None, None
 
-def create_docx(metadata_df, comments_df):
+def create_docx(metadata_list, comments_data):
     """Create a Word document with the inspection data"""
     doc = Document()
     
@@ -210,10 +199,10 @@ def create_docx(metadata_df, comments_df):
     header_cells[0].text = 'Field'
     header_cells[1].text = 'Value'
     
-    for _, row in metadata_df.iterrows():
+    for key, value in metadata_list:
         row_cells = metadata_table.add_row().cells
-        row_cells[0].text = str(row['Field'])
-        row_cells[1].text = str(row['Value'])
+        row_cells[0].text = str(key)
+        row_cells[1].text = str(value)
     
     # Add comments section
     doc.add_heading('Comments and Observations', level=1)
@@ -231,10 +220,10 @@ def create_docx(metadata_df, comments_df):
         for cell in comments_table.columns[i].cells:
             cell.width = Inches(width)
     
-    for _, row in comments_df.iterrows():
+    for row_data in comments_data:
         row_cells = comments_table.add_row().cells
-        for i, col in enumerate(["Question", "Inspector Comment", "Operator Comment", "Date"]):
-            row_cells[i].text = str(row[col])
+        for i, cell_value in enumerate(row_data):
+            row_cells[i].text = str(cell_value)
     
     # Save to BytesIO object
     docx_bytes = io.BytesIO()
@@ -246,10 +235,10 @@ def create_docx(metadata_df, comments_df):
 # Initialize session state
 if 'inspection_data' not in st.session_state:
     st.session_state.inspection_data = None
-if 'metadata_df' not in st.session_state:
-    st.session_state.metadata_df = None
-if 'comments_df' not in st.session_state:
-    st.session_state.comments_df = None
+if 'metadata_list' not in st.session_state:
+    st.session_state.metadata_list = None
+if 'comments_data' not in st.session_state:
+    st.session_state.comments_data = None
 
 # Main interface
 col1, col2 = st.columns([1, 4])
@@ -282,7 +271,7 @@ with col1:
                 try:
                     inspection_data = json.loads(file_content)
                     st.session_state.inspection_data = inspection_data
-                    st.session_state.metadata_df, st.session_state.comments_df = process_inspection_data(inspection_data)
+                    st.session_state.metadata_list, st.session_state.comments_data = process_inspection_data(inspection_data)
                     st.success("File loaded successfully!")
                 except json.JSONDecodeError as e:
                     # Try more aggressive cleaning
@@ -294,7 +283,7 @@ with col1:
                             clean_content = '{' + clean_content.split('{', 1)[1]
                         inspection_data = json.loads(clean_content)
                         st.session_state.inspection_data = inspection_data
-                        st.session_state.metadata_df, st.session_state.comments_df = process_inspection_data(inspection_data)
+                        st.session_state.metadata_list, st.session_state.comments_data = process_inspection_data(inspection_data)
                         st.success("File loaded successfully with cleanup!")
                     except json.JSONDecodeError as e:
                         st.error(f"Invalid JSON format: {str(e)}")
@@ -303,9 +292,9 @@ with col1:
         else:
             st.warning("Please upload a JSON file first")
 
-    if st.session_state.metadata_df is not None and st.session_state.comments_df is not None:
+    if st.session_state.metadata_list is not None and st.session_state.comments_data is not None:
         # Export button
-        docx_bytes = create_docx(st.session_state.metadata_df, st.session_state.comments_df)
+        docx_bytes = create_docx(st.session_state.metadata_list, st.session_state.comments_data)
         st.download_button(
             label="Export to DOCX",
             data=docx_bytes,
@@ -314,13 +303,39 @@ with col1:
         )
 
 with col2:
-    if st.session_state.metadata_df is not None:
+    if st.session_state.metadata_list is not None:
         st.subheader("Vessel Information")
-        st.dataframe(st.session_state.metadata_df, use_container_width=True, hide_index=True)
+        
+        # Create a custom table for metadata without pandas
+        metadata_html = "<table width='100%' style='border-collapse: collapse;'>"
+        metadata_html += "<tr><th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Field</th>"
+        metadata_html += "<th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Value</th></tr>"
+        
+        for key, value in st.session_state.metadata_list:
+            metadata_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px;'>{key}</td>"
+            metadata_html += f"<td style='border: 1px solid #ddd; padding: 8px;'>{value}</td></tr>"
+        
+        metadata_html += "</table>"
+        st.markdown(metadata_html, unsafe_allow_html=True)
     
-    if st.session_state.comments_df is not None:
+    if st.session_state.comments_data is not None:
         st.subheader("Comments and Observations")
-        st.dataframe(st.session_state.comments_df, use_container_width=True, hide_index=True)
+        
+        # Create a custom table for comments without pandas
+        comments_html = "<table width='100%' style='border-collapse: collapse;'>"
+        comments_html += "<tr><th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Question</th>"
+        comments_html += "<th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Inspector Comment</th>"
+        comments_html += "<th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Operator Comment</th>"
+        comments_html += "<th style='border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #5c7cba; color: white;'>Date</th></tr>"
+        
+        for row in st.session_state.comments_data:
+            comments_html += f"<tr><td style='border: 1px solid #ddd; padding: 8px;'>{row[0]}</td>"
+            comments_html += f"<td style='border: 1px solid #ddd; padding: 8px;'>{row[1]}</td>"
+            comments_html += f"<td style='border: 1px solid #ddd; padding: 8px;'>{row[2]}</td>"
+            comments_html += f"<td style='border: 1px solid #ddd; padding: 8px;'>{row[3]}</td></tr>"
+        
+        comments_html += "</table>"
+        st.markdown(comments_html, unsafe_allow_html=True)
 
 # Footer
 st.markdown("""
